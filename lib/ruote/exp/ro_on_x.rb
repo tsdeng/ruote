@@ -51,18 +51,30 @@ module Ruote::Exp
       return false unless oe_parent
         # no parent with on_error attribute found
 
-      handler = oe_parent.local_on_error(err).to_s
+      handler = oe_parent.local_on_error(err)
 
-      return false if handler == ''
+      return false if handler.to_s == ''
         # empty on_error handler nullifies ancestor's on_error
 
       workitem = msg['workitem']
       workitem['fields']['__error__'] = err
 
+      no_cancel = if handler.is_a?(String)
+        !! handler.match(/^!/)
+      elsif handler.is_a?(Array)
+        !! handler.first.to_s.match(/^!/)
+      else
+        false
+      end
+
+      # NOTE: why not pass the handler in the msg?
+      #       no, because of HandlerEntry (not JSON serializable)
+
       @context.storage.put_msg(
         'fail',
         'fei' => oe_parent.h.fei,
-        'workitem' => workitem)
+        'workitem' => workitem,
+        'do_not_cancel_children' => no_cancel)
 
       true # yes, error is being handled.
     end
@@ -235,6 +247,10 @@ module Ruote::Exp
 
       handler = on == 'on_error' ? local_on_error(err) : h[on]
 
+      if on == 'on_error' && handler.to_s.match(/^!(.+)$/)
+        handler = $1
+      end
+
       if handler.is_a?(Hash) # on_re_apply
 
         wi = handler['workitem']
@@ -359,6 +375,7 @@ module Ruote::Exp
         "#{Ruote.to_storage_id(h.fei)} #{tree.first}"
       ) if r.respond_to?(:keys)
 
+      if new_tree[0].match(/^!(.+)$/); new_tree[0] = $1; end
       new_tree[1]['_triggered'] = on
 
       attributes.each { |k, v|
